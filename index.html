@@ -1163,14 +1163,22 @@ function spawnTarget() {
         </div>
     `;
 
+    // 阻止事件冒泡 + 防止默认行为（避免点击穿透到暂停按钮等 UI）
     target.addEventListener('mousedown', (e) => {
         e.stopPropagation();
+        e.preventDefault();
         handleHit(target, e.clientX, e.clientY);
     });
     target.addEventListener('touchstart', (e) => {
-        e.stopPropagation(); e.preventDefault();
+        e.stopPropagation();
+        e.preventDefault();
         handleHit(target, e.touches[0].clientX, e.touches[0].clientY);
     }, { passive: false });
+    // 兜底：防止 click 事件穿透（target 被移除后 mouseup 可能落到其他元素上）
+    target.addEventListener('click', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+    });
 
     gameContainer.appendChild(target);
     gameState.activeTarget = target;
