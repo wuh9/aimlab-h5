@@ -1,0 +1,1493 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>AimLab H5 - 练枪训练</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        body {
+            overflow: hidden;
+            background: #0a0a1a;
+            font-family: 'Segoe UI', 'Roboto', 'Microsoft YaHei', sans-serif;
+            cursor: none;
+        }
+
+        /* 自定义准星 */
+        #crosshair {
+            position: fixed;
+            width: 30px;
+            height: 30px;
+            pointer-events: none;
+            z-index: 9999;
+            transform: translate(-50%, -50%);
+            transition: transform 0.05s ease-out;
+        }
+
+        #crosshair .line {
+            position: absolute;
+            background: rgba(255, 80, 80, 0.9);
+            box-shadow: 0 0 6px rgba(255, 80, 80, 0.5);
+        }
+
+        #crosshair .line-h {
+            width: 12px;
+            height: 2px;
+            top: 50%;
+            transform: translateY(-50%);
+        }
+        #crosshair .line-h.left { left: 0; }
+        #crosshair .line-h.right { right: 0; }
+
+        #crosshair .line-v {
+            width: 2px;
+            height: 12px;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+        #crosshair .line-v.top { top: 0; }
+        #crosshair .line-v.bottom { bottom: 0; }
+
+        #crosshair .dot {
+            position: absolute;
+            width: 4px;
+            height: 4px;
+            background: #ff5050;
+            border-radius: 50%;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            box-shadow: 0 0 8px rgba(255, 80, 80, 0.8);
+        }
+
+        #crosshair.hit { transform: translate(-50%, -50%) scale(1.3); }
+        #crosshair.miss { transform: translate(-50%, -50%) scale(0.7); }
+
+        /* 游戏区域 */
+        #game-container {
+            width: 100vw;
+            height: 100vh;
+            position: relative;
+            background: radial-gradient(ellipse at center, #141430 0%, #0a0a1a 70%);
+        }
+
+        /* 网格背景 */
+        #grid-bg {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            opacity: 0.06;
+            background-image:
+                linear-gradient(rgba(100,150,255,0.3) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(100,150,255,0.3) 1px, transparent 1px);
+            background-size: 60px 60px;
+            pointer-events: none;
+        }
+
+        /* ===== 目标 ===== */
+        .target {
+            position: absolute;
+            border-radius: 50%;
+            cursor: none;
+            transform: translate(-50%, -50%) scale(0);
+            animation: targetSpawn 0.2s cubic-bezier(0.34,1.56,0.64,1) forwards;
+            will-change: transform, opacity;
+        }
+
+        .target-inner {
+            width: 100%; height: 100%; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            position: relative; transition: all 0.08s ease;
+        }
+
+        .target-ring {
+            position: absolute; border-radius: 50%;
+            border: 2px solid; pointer-events: none;
+        }
+        .target-ring.r1 { width: 100%; height: 100%; }
+        .target-ring.r2 { width: 66%; height: 66%; }
+        .target-ring.r3 { width: 33%; height: 33%; }
+
+        .target-core {
+            width: 16%; height: 16%; border-radius: 50%;
+            background: white;
+            box-shadow: 0 0 15px rgba(255,255,255,0.9), 0 0 30px rgba(255,200,0,0.5);
+            pointer-events: none;
+        }
+
+        /* 目标类型 */
+        .target.type-normal .target-inner {
+            background: radial-gradient(circle at 40% 35%, #ff4444, #cc0000 60%, #8b0000);
+            box-shadow: 0 0 25px rgba(255,68,68,0.6), inset 0 0 20px rgba(0,0,0,0.3);
+        }
+        .target.type-normal .target-ring { border-color: rgba(255,220,220,0.5); }
+
+        .target.type-small .target-inner {
+            background: radial-gradient(circle at 40% 35%, #ffaa00, #ff6600 60%, #cc3300);
+            box-shadow: 0 0 25px rgba(255,170,0,0.6), inset 0 0 20px rgba(0,0,0,0.3);
+        }
+        .target.type-small .target-ring { border-color: rgba(255,230,180,0.5); }
+
+        .target.type-speed .target-inner {
+            background: radial-gradient(circle at 40% 35%, #aa44ff, #7700cc 60%, #440088);
+            box-shadow: 0 0 25px rgba(170,68,255,0.6), inset 0 0 20px rgba(0,0,0,0.3);
+        }
+        .target.type-speed .target-ring { border-color: rgba(230,200,255,0.5); }
+
+        .target:hover .target-inner { filter: brightness(1.3); }
+
+        @keyframes targetSpawn {
+            0% { transform: translate(-50%,-50%) scale(0); opacity: 0; }
+            100% { transform: translate(-50%,-50%) scale(1); opacity: 1; }
+        }
+        @keyframes targetHit {
+            0% { transform: translate(-50%,-50%) scale(1); opacity: 1; }
+            50% { transform: translate(-50%,-50%) scale(1.5); opacity: 0.5; }
+            100% { transform: translate(-50%,-50%) scale(0); opacity: 0; }
+        }
+        .target.hitting { animation: targetHit 0.18s ease-out forwards !important; pointer-events: none; }
+
+        /* 命中粒子 */
+        .hit-particle {
+            position: absolute; width: 6px; height: 6px; border-radius: 50%;
+            pointer-events: none; z-index: 100;
+        }
+        @keyframes particleFly {
+            0% { transform: translate(-50%,-50%) scale(1); opacity: 1; }
+            100% { transform: translate(var(--tx), var(--ty)) scale(0); opacity: 0; }
+        }
+
+        /* 分数弹出 */
+        .score-popup {
+            position: fixed; font-size: 22px; font-weight: bold;
+            pointer-events: none; z-index: 500;
+            text-shadow: 0 0 10px currentColor, 0 2px 4px rgba(0,0,0,0.5);
+            animation: scoreFloat 0.8s ease-out forwards;
+        }
+        @keyframes scoreFloat {
+            0% { transform: translateY(0) scale(0.5); opacity: 0; }
+            15% { transform: translateY(-10px) scale(1.2); opacity: 1; }
+            100% { transform: translateY(-60px) scale(1); opacity: 0; }
+        }
+
+        /* ===== 暂停按钮 ===== */
+        #pause-btn {
+            position: fixed;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 900;
+            background: rgba(10, 10, 30, 0.75);
+            border: 1px solid rgba(100, 150, 255, 0.25);
+            border-radius: 10px;
+            padding: 7px 18px;
+            cursor: pointer;
+            backdrop-filter: blur(8px);
+            display: flex; align-items: center; gap: 7px;
+            transition: all 0.2s ease;
+            pointer-events: auto;
+        }
+        #pause-btn:hover {
+            background: rgba(30, 30, 70, 0.85);
+            border-color: rgba(100, 150, 255, 0.45);
+            transform: scale(1.05);
+        }
+        #pause-btn:active { transform: scale(0.97); }
+        #pause-btn .pause-icon {
+            font-size: 16px; color: rgba(200,210,255,0.85); letter-spacing: -1px;
+        }
+        #pause-btn .pause-label {
+            font-size: 12px; color: rgba(180,190,240,0.7); font-weight: 600;
+            letter-spacing: 1px; text-transform: uppercase;
+        }
+
+        /* ===== 暂停面板 ===== */
+        #pause-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(5, 5, 20, 0.92); backdrop-filter: blur(12px);
+            display: flex; align-items: center; justify-content: center;
+            z-index: 2500; opacity: 0; pointer-events: none;
+            transition: opacity 0.3s ease;
+        }
+        #pause-overlay.visible {
+            opacity: 1; pointer-events: auto;
+        }
+
+        .pause-content {
+            text-align: center; padding: 45px 55px;
+            background: rgba(15, 15, 40, 0.8);
+            border: 1px solid rgba(100, 150, 255, 0.15);
+            border-radius: 20px;
+        }
+
+        .pause-title {
+            font-size: 42px; font-weight: 900; color: #fff;
+            letter-spacing: 4px; margin-bottom: 6px;
+        }
+        .pause-subtitle {
+            font-size: 15px; color: rgba(180,190,240,0.5);
+            margin-bottom: 35px; letter-spacing: 1px;
+        }
+
+        .pause-stats-row {
+            display: flex; justify-content: center; gap: 24px; margin-bottom: 36px;
+        }
+        .pause-stat {
+            text-align: center;
+        }
+        .pause-stat-val {
+            font-size: 26px; font-weight: bold; color: #e8eaff;
+            font-family: 'Consolas','Monaco',monospace;
+        }
+        .pause-stat-val.c-score { color: #ffd93d; }
+        .pause-stat-val.c-combo { color: #6bcb77; }
+        .pause-stat-val.c-time { color: #ff6b6b; }
+        .pause-stat-lbl {
+            font-size: 11px; color: rgba(160,170,220,0.5);
+            margin-top: 3px; letter-spacing: 1px; text-transform: uppercase;
+        }
+
+        .pause-buttons {
+            display: flex; gap: 14px; justify-content: center;
+        }
+
+        .pause-btn-action {
+            padding: 13px 38px; font-size: 16px; font-weight: bold;
+            border: none; border-radius: 40px; cursor: pointer;
+            letter-spacing: 2px; text-transform: uppercase;
+            transition: all 0.25s ease; pointer-events: auto;
+        }
+        .btn-resume {
+            color: #fff; background: linear-gradient(135deg, #6bcb77, #4a9d57);
+            box-shadow: 0 6px 24px rgba(107,203,119,0.3);
+        }
+        .btn-resume:hover { transform: translateY(-2px) scale(1.04); box-shadow: 0 10px 32px rgba(107,203,119,0.45); }
+        .btn-quit {
+            color: #fff; background: linear-gradient(135deg, #ff6b6b, #cc4444);
+            box-shadow: 0 6px 24px rgba(255,107,107,0.3);
+        }
+        .btn-quit:hover { transform: translateY(-2px) scale(1.04); box-shadow: 0 10px 32px rgba(255,107,107,0.45); }
+        .pause-btn-action:active { transform: translateY(0) scale(0.98); }
+
+        /* ===== HUD ===== */
+        #hud {
+            position: fixed; top: 0; left: 0; right: 0;
+            padding: 16px 24px;
+            display: flex; justify-content: space-between; align-items: flex-start;
+            z-index: 800; pointer-events: none;
+        }
+        .hud-left, .hud-right {
+            display: flex; gap: 20px; align-items: center;
+        }
+        .hud-panel {
+            background: rgba(10,10,30,0.85);
+            border: 1px solid rgba(100,150,255,0.2);
+            border-radius: 12px; padding: 12px 20px;
+            backdrop-filter: blur(10px);
+        }
+        .hud-item { text-align: center; min-width: 70px; }
+        .hud-label {
+            font-size: 11px; color: rgba(150,170,220,0.7);
+            text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 3px;
+        }
+        .hud-value {
+            font-size: 26px; font-weight: bold; color: #e8eaff;
+            font-family: 'Consolas','Monaco',monospace; line-height: 1.2;
+        }
+        .hud-item.timer .hud-value { color: #ff6b6b; font-size: 36px; min-width: 90px; }
+        .hud-item.score .hud-value { color: #ffd93d; font-size: 32px; }
+        .hud-item.combo .hud-value { color: #6bcb77; font-size: 28px; transition: transform 0.1s ease; }
+        .hud-item.combo.pulse .hud-value { animation: comboPulse 0.2s ease; }
+        @keyframes comboPulse {
+            0%,100% { transform: scale(1); } 50% { transform: scale(1.3); }
+        }
+        .hud-item.accuracy .hud-value { color: #4ecdc4; }
+        .hud-item.reaction .hud-value { color: #a29bfe; font-size: 20px; }
+
+        /* 连击条 */
+        #combo-bar-container {
+            position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
+            width: 300px; z-index: 800; pointer-events: none;
+        }
+        #combo-bar-bg {
+            width: 100%; height: 6px; background: rgba(255,255,255,0.1);
+            border-radius: 3px; overflow: hidden;
+        }
+        #combo-bar-fill {
+            height: 100%; width: 0%;
+            background: linear-gradient(90deg, #ff6b6b, #ffd93d, #6bcb77);
+            border-radius: 3px; transition: width 0.15s ease;
+        }
+        #combo-text {
+            text-align: center; font-size: 14px;
+            color: rgba(255,215,0,0.8); margin-top: 6px;
+            letter-spacing: 2px; font-weight: bold; opacity: 0; transition: opacity 0.2s;
+        }
+        #combo-text.visible { opacity: 1; }
+
+        /* ===== 开始/结束界面 ===== */
+        #overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(5,5,20,0.95);
+            display: flex; align-items: center; justify-content: center;
+            z-index: 2000; backdrop-filter: blur(8px);
+            transition: opacity 0.5s ease;
+        }
+        #overlay.hidden { opacity: 0; pointer-events: none; }
+
+        .overlay-content {
+            text-align: center; max-width: 600px; padding: 40px;
+        }
+        .overlay-title {
+            font-size: 56px; font-weight: 900; color: #fff;
+            margin-bottom: 8px; letter-spacing: 4px; text-transform: uppercase;
+        }
+        .overlay-title span { color: #ff5050; }
+        .overlay-subtitle {
+            font-size: 18px; color: rgba(200,210,255,0.6);
+            margin-bottom: 30px; letter-spacing: 2px;
+        }
+
+        /* ===== 难度选择器 ===== */
+        .difficulty-selector {
+            display: flex; gap: 14px; justify-content: center;
+            margin-bottom: 28px;
+        }
+        .diff-option {
+            flex: 1; max-width: 140px; padding: 18px 10px 14px;
+            border: 2px solid rgba(255,255,255,0.08);
+            border-radius: 14px; cursor: pointer;
+            background: rgba(255,255,255,0.03);
+            transition: all 0.25s ease; text-align: center;
+            pointer-events: auto;
+        }
+        .diff-option:hover {
+            background: rgba(255,255,255,0.07);
+            border-color: rgba(255,255,255,0.18);
+            transform: translateY(-2px);
+        }
+        .diff-option.selected {
+            border-color: currentColor; background: rgba(currentColor, 0.1);
+            box-shadow: 0 0 24px rgba(currentColor, 0.15), inset 0 0 20px rgba(currentColor, 0.05);
+        }
+        .diff-option.diff-easy.selected {
+            border-color: #6bcb77; background: rgba(107,203,119,0.1);
+            box-shadow: 0 0 24px rgba(107,203,119,0.15), inset 0 0 20px rgba(107,203,119,0.06);
+        }
+        .diff-option.diff-normal.selected {
+            border-color: #ffd93d; background: rgba(255,217,61,0.1);
+            box-shadow: 0 0 24px rgba(255,217,61,0.15), inset 0 0 20px rgba(255,217,61,0.06);
+        }
+        .diff-option.diff-hard.selected {
+            border-color: #ff6b6b; background: rgba(255,107,107,0.1);
+            box-shadow: 0 0 24px rgba(255,107,107,0.15), inset 0 0 20px rgba(255,107,107,0.06);
+        }
+        .diff-icon {
+            font-size: 28px; margin-bottom: 6px;
+        }
+        .diff-name {
+            font-size: 16px; font-weight: 700; margin-bottom: 4px;
+        }
+        .diff-easy .diff-name { color: #6bcb77; }
+        .diff-normal .diff-name { color: #ffd93d; }
+        .diff-hard .diff-name { color: #ff6b6b; }
+        .diff-desc {
+            font-size: 11px; color: rgba(180,190,240,0.45); line-height: 1.4;
+        }
+
+        .start-btn {
+            display: inline-block; padding: 18px 60px;
+            font-size: 20px; font-weight: bold; color: #fff;
+            background: linear-gradient(135deg, #ff5050, #cc2020);
+            border: none; border-radius: 50px; cursor: pointer;
+            letter-spacing: 2px; text-transform: uppercase;
+            transition: all 0.3s ease;
+            box-shadow: 0 8px 30px rgba(255,80,80,0.3);
+            pointer-events: auto;
+        }
+        .start-btn:hover {
+            transform: translateY(-3px) scale(1.05);
+            box-shadow: 0 12px 40px rgba(255,80,80,0.5);
+        }
+        .start-btn:active { transform: translateY(0) scale(0.98); }
+
+        /* 游戏规则 */
+        .rules-box {
+            margin-top: 28px; text-align: left;
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 14px; padding: 20px 26px;
+        }
+        .rules-title {
+            font-size: 13px; color: rgba(200,210,255,0.5);
+            letter-spacing: 2px; margin-bottom: 12px; text-transform: uppercase;
+        }
+        .rule-row {
+            display: flex; align-items: center; gap: 10px;
+            margin-bottom: 8px; font-size: 13px; color: rgba(220,225,255,0.72);
+        }
+        .rule-icon {
+            width: 26px; height: 26px; border-radius: 6px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 12px; font-weight: bold; color: #fff; flex-shrink: 0;
+        }
+        .rule-icon.hit { background: linear-gradient(135deg,#6bcb77,#4a9d57); }
+        .rule-icon.miss { background: linear-gradient(135deg,#ff6b6b,#cc4444); }
+        .rule-icon.combo { background: linear-gradient(135deg,#ffd93d,#ccaa00); }
+        .rule-icon.speed { background: linear-gradient(135deg,#a29bfe,#7765e3); }
+
+        /* 结算面板 */
+        #result-panel { display: none; }
+        #result-panel.visible { display: block; }
+
+        .result-stats {
+            display: grid; grid-template-columns: repeat(2, 1fr);
+            gap: 14px; margin: 24px 0;
+        }
+        .result-stat-card {
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 12px; padding: 16px; text-align: center;
+        }
+        .result-stat-label {
+            font-size: 11px; color: rgba(180,190,240,0.5);
+            letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 5px;
+        }
+        .result-stat-value {
+            font-size: 30px; font-weight: bold; color: #e8eaff;
+            font-family: 'Consolas', monospace;
+        }
+        .result-stat-value.score { color: #ffd93d; }
+        .result-stat-value.accuracy { color: #4ecdc4; }
+        .result-stat-value.hits { color: #6bcb77; }
+        .result-stat-value.misses { color: #ff6b6b; }
+        .result-stat-value.maxCombo { color: #ffa94d; }
+        .result-stat-value.avgReaction { color: #a29bfe; }
+        .result-stat-value.bestReaction { color: #69db7c; }
+        .result-stat-value.targets { color: #74c0fc; }
+
+        .grade-badge {
+            font-size: 72px; font-weight: 900; margin-bottom: 8px;
+            text-shadow: 0 0 40px currentColor;
+        }
+        .grade-S { color: #ffd700; }
+        .grade-A { color: #6bcb77; }
+        .grade-B { color: #4ecdc4; }
+        .grade-C { color: #ffa94d; }
+        .grade-D { color: #ff6b6b; }
+
+        .result-subtitle {
+            font-size: 16px; color: rgba(200,210,255,0.5); margin-bottom: 22px;
+        }
+
+        /* 排行榜击败信息 */
+        .rank-beat-info {
+            background: linear-gradient(135deg, rgba(255,215,0,0.08), rgba(255,170,0,0.04));
+            border: 1px solid rgba(255,215,0,0.2);
+            border-radius: 14px; padding: 18px 28px; margin-bottom: 24px;
+        }
+        .rank-beat-percent {
+            font-size: 48px; font-weight: 900; color: #ffd93d;
+            text-shadow: 0 0 30px rgba(255,217,61,0.4);
+        }
+        .rank-beat-desc {
+            font-size: 14px; color: rgba(220,225,255,0.65); margin-top: 2px;
+        }
+        .rank-beat-detail {
+            font-size: 12px; color: rgba(180,190,240,0.4);
+            margin-top: 6px; letter-spacing: 0.5px;
+        }
+
+        /* 倒计时提示 */
+        #countdown-toast {
+            position: fixed; top: 50%; left: 50%;
+            transform: translate(-50%,-50%);
+            font-size: 120px; font-weight: 900; color: #fff;
+            text-shadow: 0 0 60px rgba(255,80,80,0.8);
+            z-index: 1500; opacity: 0; pointer-events: none;
+            font-family: 'Impact','Arial Black', sans-serif;
+        }
+        #countdown-toast.show { animation: countdownPop 0.9s ease-out forwards; }
+        @keyframes countdownPop {
+            0% { opacity: 0; transform: translate(-50%,-50%) scale(0.3); }
+            20% { opacity: 1; transform: translate(-50%,-50%) scale(1.2); }
+            80% { opacity: 1; transform: translate(-50%,-50%) scale(1); }
+            100% { opacity: 0; transform: translate(-50%,-50%) scale(0.8); }
+        }
+
+        /* 反馈文字 */
+        #feedback-text {
+            position: fixed; top: 42%; left: 50%; transform: translateX(-50%);
+            font-size: 18px; font-weight: bold; letter-spacing: 3px;
+            text-transform: uppercase; z-index: 400;
+            pointer-events: none; opacity: 0; transition: opacity 0.1s;
+        }
+        #feedback-text.show { opacity: 1; }
+        #feedback-text.good { color: #6bcb77; text-shadow: 0 0 20px rgba(107,203,119,0.6); }
+        #feedback-text.great { color: #ffd93d; text-shadow: 0 0 20px rgba(255,217,61,0.6); }
+        #feedback-text.perfect { color: #ff6b9d; text-shadow: 0 0 20px rgba(255,107,157,0.8); }
+        #feedback-text.bad { color: #ff6b6b; text-shadow: 0 0 20px rgba(255,107,107,0.6); }
+
+        /* 移动端适配 */
+        @media (max-width: 768px) {
+            #hud { padding: 10px 14px; }
+            .hud-panel { padding: 8px 12px; }
+            .hud-value { font-size: 20px !important; }
+            .hud-item.timer .hud-value { font-size: 28px !important; }
+            .hud-item.score .hud-value { font-size: 24px !important; }
+            .hud-item.combo .hud-value { font-size: 22px !important; }
+            .hud-item { min-width: 55px; }
+            .hud-label { font-size: 9px; }
+            .overlay-title { font-size: 36px; }
+            .rules-box { padding: 16px 20px; }
+            .result-stat-value { font-size: 26px; }
+            .grade-badge { font-size: 52px; }
+            #crosshair { width: 40px; height: 40px; }
+            #crosshair .line-h { width: 16px; }
+            #crosshair .line-v { height: 16px; }
+            #pause-btn { top: 8px; padding: 6px 14px; }
+            #pause-btn .pause-label { display: none; }
+            .diff-option { max-width: 105px; padding: 14px 8px 10px; }
+            .diff-name { font-size: 14px; }
+            .diff-desc { font-size: 10px; }
+            .pause-content { padding: 30px 35px; }
+            .pause-title { font-size: 32px; }
+            .rank-beat-percent { font-size: 36px; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 准星 -->
+    <div id="crosshair">
+        <div class="line line-h left"></div><div class="line line-h right"></div>
+        <div class="line line-v top"></div><div class="line line-v bottom"></div>
+        <div class="dot"></div>
+    </div>
+
+    <!-- 游戏区域 -->
+    <div id="game-container"><div id="grid-bg"></div></div>
+
+    <!-- 暂停按钮 -->
+    <button id="pause-btn" style="display:none;" onclick="togglePause()">
+        <span class="pause-icon">⏸</span>
+        <span class="pause-label">暂停</span>
+    </button>
+
+    <!-- HUD -->
+    <div id="hud" style="display:none;">
+        <div class="hud-left">
+            <div class="hud-panel" style="display:flex;gap:16px;">
+                <div class="hud-item timer">
+                    <div class="hud-label">时间</div><div class="hud-value" id="timer">60</div>
+                </div>
+                <div class="hud-item score">
+                    <div class="hud-label">得分</div><div class="hud-value" id="score">0</div>
+                </div>
+            </div>
+        </div>
+        <div class="hud-right">
+            <div class="hud-panel" style="display:flex;gap:16px;">
+                <div class="hud-item combo">
+                    <div class="hud-label">连击</div><div class="hud-value" id="combo">0</div>
+                </div>
+                <div class="hud-item accuracy">
+                    <div class="hud-label">命中率</div><div class="hud-value" id="accuracy">0%</div>
+                </div>
+                <div class="hud-item reaction">
+                    <div class="hud-label">反应</div><div class="hud-value" id="reaction">---</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 连击条 -->
+    <div id="combo-bar-container" style="display:none;">
+        <div id="combo-bar-bg"><div id="combo-bar-fill"></div></div>
+        <div id="combo-text"></div>
+    </div>
+
+    <!-- 暂停面板 -->
+    <div id="pause-overlay">
+        <div class="pause-content">
+            <div class="pause-title">⏸ PAUSED</div>
+            <div class="pause-subtitle">休息一下，随时回来继续挑战</div>
+            <div class="pause-stats-row">
+                <div class="pause-stat">
+                    <div class="pause-stat-val c-score" id="pause-score">0</div>
+                    <div class="pause-stat-lbl">当前得分</div>
+                </div>
+                <div class="pause-stat">
+                    <div class="pause-stat-val c-combo" id="pause-combo">0</div>
+                    <div class="pause-stat-lbl">当前连击</div>
+                </div>
+                <div class="pause-stat">
+                    <div class="pause-stat-val c-time" id="pause-time">60s</div>
+                    <div class="pause-stat-lbl">剩余时间</div>
+                </div>
+            </div>
+            <div class="pause-buttons">
+                <button class="pause-btn-action btn-resume" onclick="togglePause()">继续游戏</button>
+                <button class="pause-btn-action btn-quit" onclick="quitGame()">退出训练</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 倒计时提示 -->
+    <div id="countdown-toast"></div>
+
+    <!-- 反馈文字 -->
+    <div id="feedback-text"></div>
+
+    <!-- 覆盖层（开始/结束） -->
+    <div id="overlay">
+        <!-- 开始界面 -->
+        <div class="overlay-content" id="start-panel">
+            <div class="overlay-title">AIM<span>LAB</span></div>
+            <div class="overlay-subtitle">精准射击训练系统 · 60秒极限挑战</div>
+
+            <!-- 难度选择 -->
+            <div class="difficulty-selector">
+                <div class="diff-option diff-easy selected" data-diff="easy" onclick="selectDifficulty('easy')">
+                    <div class="diff-icon">🟢</div>
+                    <div class="diff-name">简单</div>
+                    <div class="diff-desc">目标距离较近<br>适合入门练习</div>
+                </div>
+                <div class="diff-option diff-normal" data-diff="normal" onclick="selectDifficulty('normal')">
+                    <div class="diff-icon">🟡</div>
+                    <div class="diff-name">普通</div>
+                    <div class="diff-desc">标准目标分布<br>均衡的挑战性</div>
+                </div>
+                <div class="diff-option diff-hard" data-diff="hard" onclick="selectDifficulty('hard')">
+                    <div class="diff-icon">🔴</div>
+                    <div class="diff-name">困难</div>
+                    <div class="diff-desc">目标跨度极大<br>考验极致瞄准</div>
+                </div>
+            </div>
+
+            <button class="start-btn" onclick="startGame()">开始训练</button>
+            <div class="rules-box">
+                <div class="rules-title">计分机制</div>
+                <div class="rule-row"><div class="rule-icon hit">+100</div>命中目标基础分</div>
+                <div class="rule-row"><div class="rule-icon hit" style="background:linear-gradient(135deg,#74c0fc,#339af0)">+50</div>命中靶心额外奖励</div>
+                <div class="rule-row"><div class="rule-icon miss">-15</div>点击空白处失误扣分</div>
+                <div class="rule-row"><div class="rule-icon combo">x1.x</div>连击倍率加成（最高 x3.0）</div>
+                <div class="rule-row"><div class="rule-icon speed">⚡</div>快速反应额外加分（&lt;350ms）</div>
+                <div class="rule-row"><div style="font-size:18px">🎯</div><span style="color:rgba(255,170,0,0.85)">红色=普通 | 橙色=小目标(x1.5) | 紫色=速消(x2.0)</span></div>
+            </div>
+        </div>
+
+        <!-- 结算界面 -->
+        <div class="overlay-content" id="result-panel">
+            <div class="grade-badge" id="grade-badge">S</div>
+            <div class="result-subtitle" id="result-subtitle">训练完成！</div>
+
+            <!-- 排行榜击败信息 -->
+            <div class="rank-beat-info" id="rank-beat-box">
+                <div class="rank-beat-percent" id="rank-beat-percent">73%</div>
+                <div class="rank-beat-desc" id="rank-beat-desc">你击败了全球 73% 的玩家！</div>
+                <div class="rank-beat-detail" id="rank-beat-detail">排名约第 XXX 万名 / 共 XXX 万名玩家</div>
+            </div>
+
+            <div class="result-stats">
+                <div class="result-stat-card">
+                    <div class="result-stat-label">最终得分</div>
+                    <div class="result-stat-value score" id="final-score">0</div>
+                </div>
+                <div class="result-stat-card">
+                    <div class="result-stat-label">命中率</div>
+                    <div class="result-stat-value accuracy" id="final-accuracy">0%</div>
+                </div>
+                <div class="result-stat-card">
+                    <div class="result-stat-label">命中数</div>
+                    <div class="result-stat-value hits" id="final-hits">0</div>
+                </div>
+                <div class="result-stat-card">
+                    <div class="result-stat-label">失误数</div>
+                    <div class="result-stat-value misses" id="final-misses">0</div>
+                </div>
+                <div class="result-stat-card">
+                    <div class="result-stat-label">最大连击</div>
+                    <div class="result-stat-value maxCombo" id="final-max-combo">0</div>
+                </div>
+                <div class="result-stat-card">
+                    <div class="result-stat-label">平均反应</div>
+                    <div class="result-stat-value avgReaction" id="final-avg-reaction">---</div>
+                </div>
+                <div class="result-stat-card">
+                    <div class="result-stat-label">最快反应</div>
+                    <div class="result-stat-value bestReaction" id="final-best-reaction">---</div>
+                </div>
+                <div class="result-stat-card">
+                    <div class="result-stat-label">击杀目标</div>
+                    <div class="result-stat-value targets" id="final-targets">0</div>
+                </div>
+            </div>
+            <div style="display:flex; gap: 14px; justify-content: center; margin-top: 6px;">
+                <button class="start-btn" onclick="restartGame()" style="padding:14px 40px; font-size:17px;">再来一局</button>
+                <button class="start-btn" onclick="goHome()" style="padding:14px 40px; font-size:17px; background:linear-gradient(135deg,#4a5580,#2d3555); box-shadow:0 8px 30px rgba(74,85,128,0.3);">回到主页</button>
+            </div>
+        </div>
+    </div>
+
+<script>
+// ==================== 难度配置 ====================
+const DIFFICULTY_CONFIG = {
+    easy:   { name: '简单', minDistanceRatio: 0.15, maxDistanceRatio: 0.35 },
+    normal: { name: '普通', minDistanceRatio: 0.25, maxDistanceRatio: 0.55 },
+    hard:   { name: '困难', minDistanceRatio: 0.42, maxDistanceRatio: 0.78 },
+};
+
+// ==================== 游戏配置 ====================
+const CONFIG = {
+    gameDuration: 60,
+    baseTargetSize: 70,
+    smallTargetSize: 45,
+    spawnMinDelay: 300,
+    spawnMaxDelay: 1200,
+    targetLifetimeSpeedType: 1800,
+    scorePerHit: 100,
+    coreHitBonus: 50,
+    missPenalty: 15,
+    smallTargetMult: 1.5,
+    speedTargetMult: 2.0,
+    maxComboMultiplier: 3.0,
+    fastReactionThreshold: 350,
+    fastReactionBonus: 30,
+};
+
+// ==================== 排行榜模拟数据 ====================
+// 使用正态分布模拟全球玩家分数分布
+const LEADERBOARD = {
+    // 参数：均值和标准差（按难度）
+    easy:   { mu: 3200, sigma: 1200 },
+    normal: { mu: 2800, sigma: 1100 },
+    hard:   { mu: 2200, sigma: 950 },
+
+    // 虚拟总玩家人数（百万级）
+    totalPlayers: 187,
+
+    // 正态分布 CDF 近似计算（用于求击败百分比）
+    cdf(x, mu, sigma) {
+        const z = (x - mu) / sigma;
+        // Abramowitz & Stegun 近似
+        const a1 =  0.254829592, a2 = -0.284496736, a3 =  1.421413741;
+        const a4 = -1.453152027, a5 =  1.061405429, p  =  0.3275911;
+        const sign = z < 0 ? -1 : 1;
+        const zz = Math.abs(z) / Math.sqrt(2);
+        const t = 1 / (1 + p * zz);
+        const y = 1 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * Math.exp(-zz * zz);
+        return 0.5 * (1 + sign * y);
+    }
+};
+
+// ==================== 游戏状态 ====================
+let gameState = {
+    isRunning: false,
+    isPaused: false,
+    difficulty: 'normal',
+    timeLeft: CONFIG.gameDuration,
+    score: 0,
+    combo: 0,
+    maxCombo: 0,
+    hits: 0,
+    misses: 0,
+    totalShots: 0,
+    reactionTimes: [],
+    currentTargetSpawnTime: 0,
+    activeTarget: null,
+    lastTargetPos: null,  // 上一个目标的位置，用于控制间距
+    gameTimerId: null,
+    comboDecayTimerId: null,
+};
+
+// DOM 引用
+let crosshair, gameContainer, overlay, startPanel, resultPanel;
+let timerEl, scoreEl, comboEl, accuracyEl, reactionEl;
+let comboBarFill, comboText, countdownToast, feedbackText;
+let pauseBtn, pauseOverlay;
+
+// ==================== 初始化 ====================
+document.addEventListener('DOMContentLoaded', () => {
+    crosshair = document.getElementById('crosshair');
+    gameContainer = document.getElementById('game-container');
+    overlay = document.getElementById('overlay');
+    startPanel = document.getElementById('start-panel');
+    resultPanel = document.getElementById('result-panel');
+    timerEl = document.getElementById('timer');
+    scoreEl = document.getElementById('score');
+    comboEl = document.getElementById('combo');
+    accuracyEl = document.getElementById('accuracy');
+    reactionEl = document.getElementById('reaction');
+    comboBarFill = document.getElementById('combo-bar-fill');
+    comboText = document.getElementById('combo-text');
+    countdownToast = document.getElementById('countdown-toast');
+    feedbackText = document.getElementById('feedback-text');
+    pauseBtn = document.getElementById('pause-btn');
+    pauseOverlay = document.getElementById('pause-overlay');
+
+    // 初始隐藏准星
+    hideCrosshair();
+
+    initCrosshair();
+});
+
+// 准星跟随鼠标
+function initCrosshair() {
+    document.addEventListener('mousemove', (e) => {
+        if (!gameState.isRunning || gameState.isPaused) return;
+        updateCrosshairPos(e.clientX, e.clientY);
+    });
+    document.addEventListener('touchmove', (e) => {
+        if (!gameState.isRunning || gameState.isPaused) return;
+        updateCrosshairPos(e.touches[0].clientX, e.touches[0].clientY);
+        e.preventDefault();
+    }, { passive: false });
+
+    gameContainer.addEventListener('mousedown', handleMissClick);
+    gameContainer.addEventListener('touchstart', (e) => {
+        if (e.target.closest('.target')) return;
+        handleMissClick({ clientX: e.touches[0].clientX, clientY: e.touches[0].clientY });
+    });
+
+    // ESC 键暂停
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && gameState.isRunning && !gameState.isPaused) {
+            togglePause();
+        } else if (e.key === 'Escape' && gameState.isPaused) {
+            togglePause();
+        }
+    });
+}
+
+function updateCrosshairPos(x, y) {
+    crosshair.style.left = x + 'px';
+    crosshair.style.top = y + 'px';
+}
+
+function resetCrosshair() {
+    crosshair.style.transform = 'translate(-50%,-50%)';
+    crosshair.classList.remove('hit', 'miss');
+}
+
+// ==================== 难度选择 ====================
+let selectedDifficulty = 'normal';
+
+function selectDifficulty(diff) {
+    selectedDifficulty = diff;
+    document.querySelectorAll('.diff-option').forEach(el => el.classList.remove('selected'));
+    document.querySelector(`.diff-option[data-diff="${diff}"]`).classList.add('selected');
+}
+
+// ==================== 暂停/继续/退出 ====================
+function togglePause() {
+    if (!gameState.isRunning) return;
+
+    if (!gameState.isPaused) {
+        // 进入暂停
+        gameState.isPaused = true;
+        clearInterval(gameState.gameTimerId);
+        clearTimeout(gameState.comboDecayTimerId);
+
+        // 更新暂停面板数据
+        document.getElementById('pause-score').textContent = gameState.score;
+        document.getElementById('pause-combo').textContent = gameState.combo;
+        document.getElementById('pause-time').textContent = gameState.timeLeft + 's';
+
+        pauseOverlay.classList.add('visible');
+        pauseBtn.style.display = 'none';
+
+        // 隐藏准星
+        crosshair.style.opacity = '0';
+    } else {
+        // 恢复游戏
+        gameState.isPaused = false;
+        pauseOverlay.classList.remove('visible');
+        pauseBtn.style.display = '';
+        crosshair.style.opacity = '1';
+
+        // 恢复计时器和连击衰减
+        startGameTimer();
+        startComboDecay();
+
+        // 如果有活动目标且是 speed 类型，重新设置超时
+        // 简化处理：speed 类型超时不恢复精确计时，但不影响体验
+    }
+}
+
+function quitGame() {
+    gameState.isPaused = false;
+    pauseOverlay.classList.remove('visible');
+
+    endGame(true); // isQuit = true
+}
+
+// ==================== 游戏流程 ====================
+async function startGame() {
+    const diffConfig = DIFFICULTY_CONFIG[selectedDifficulty];
+
+    gameState = {
+        isRunning: false,
+        isPaused: false,
+        difficulty: selectedDifficulty,
+        timeLeft: CONFIG.gameDuration,
+        score: 0,
+        combo: 0,
+        maxCombo: 0,
+        hits: 0,
+        misses: 0,
+        totalShots: 0,
+        reactionTimes: [],
+        currentTargetSpawnTime: 0,
+        activeTarget: null,
+        lastTargetPos: null,
+        gameTimerId: null,
+        comboDecayTimerId: null,
+    };
+
+    clearAllTargets();
+
+    // UI 切换
+    startPanel.style.display = 'none';
+    resultPanel.classList.remove('visible');
+    overlay.classList.add('hidden');
+
+    document.getElementById('hud').style.display = 'flex';
+    document.getElementById('combo-bar-container').style.display = 'block';
+    pauseBtn.style.display = '';
+    showCrosshair();
+
+    // 重置暂停相关
+    pauseOverlay.classList.remove('visible');
+    timerEl.style.color = '';
+    timerEl.style.animation = '';
+
+    updateHUD();
+
+    await showCountdown();
+
+    // 开始游戏
+    gameState.isRunning = true;
+    gameState.currentTargetSpawnTime = Date.now();
+    
+    spawnTarget();
+    startGameTimer();
+    startComboDecay();
+}
+
+function showCountdown() {
+    return new Promise((resolve) => {
+        let count = 3;
+        function tick() {
+            if (count > 0) {
+                showCountdownNumber(count);
+                count--;
+                setTimeout(tick, 850);
+            } else {
+                showCountdownNumber('GO!');
+                setTimeout(resolve, 700);
+            }
+        }
+        tick();
+    });
+}
+
+function showCountdownNumber(n) {
+    countdownToast.textContent = n;
+    countdownToast.className = '';
+    void countdownToast.offsetWidth;
+    countdownToast.classList.add('show');
+}
+
+function endGame(isQuit = false) {
+    gameState.isRunning = false;
+
+    clearInterval(gameState.gameTimerId);
+    clearTimeout(gameState.comboDecayTimerId);
+
+    clearAllTargets();
+    document.getElementById('hud').style.display = 'none';
+    document.getElementById('combo-bar-container').style.display = 'none';
+    pauseBtn.style.display = 'none';
+
+    // 游戏结束隐藏准星，避免残留
+    hideCrosshair();
+
+    showResultPanel(isQuit);
+    overlay.classList.remove('hidden');
+}
+
+function restartGame() {
+    startGame();
+}
+
+function goHome() {
+    gameState.isRunning = false;
+    gameState.isPaused = false;
+    clearInterval(gameState.gameTimerId);
+    clearTimeout(gameState.comboDecayTimerId);
+
+    clearAllTargets();
+    resultPanel.classList.remove('visible');
+    startPanel.style.display = '';
+    pauseOverlay.classList.remove('visible');
+    document.getElementById('hud').style.display = 'none';
+    document.getElementById('combo-bar-container').style.display = 'none';
+    pauseBtn.style.display = 'none';
+
+    // 隐藏准星
+    hideCrosshair();
+
+    overlay.classList.remove('hidden');
+}
+
+/** 隐藏准星（非游戏状态） */
+function hideCrosshair() {
+    crosshair.style.opacity = '0';
+    crosshair.style.left = '-100px';
+    crosshair.style.top = '-100px';
+}
+
+/** 显示准星（游戏状态） */
+function showCrosshair() {
+    crosshair.style.opacity = '1';
+}
+
+// ==================== 游戏计时器 ====================
+function startGameTimer() {
+    if (gameState.isPaused) return;
+    gameState.gameTimerId = setInterval(() => {
+        gameState.timeLeft--;
+        timerEl.textContent = gameState.timeLeft;
+
+        if (gameState.timeLeft <= 10 && gameState.timeLeft > 0) {
+            timerEl.style.color = '#ff3030';
+            timerEl.style.animation = 'comboPulse 0.5s infinite';
+        }
+
+        if (gameState.timeLeft <= 0) {
+            endGame();
+        }
+    }, 1000);
+}
+
+// ==================== 连击衰减 ====================
+function startComboDecay() {
+    clearTimeout(gameState.comboDecayTimerId);
+    if (!gameState.isRunning || gameState.isPaused) return;
+    gameState.comboDecayTimerId = setTimeout(() => {
+        if (gameState.isRunning && !gameState.isPaused && gameState.combo > 0) {
+            gameState.combo = 0;
+            updateHUD();
+        }
+    }, 2500);
+}
+
+// ==================== 目标生成与销毁 ====================
+function spawnTarget() {
+    if (!gameState.isRunning || gameState.isPaused) return;
+
+    const rand = Math.random();
+    let type, size;
+    if (rand < 0.55)      { type = 'normal'; size = CONFIG.baseTargetSize; }
+    else if (rand < 0.82) { type = 'small'; size = CONFIG.smallTargetSize; }
+    else                  { type = 'speed'; size = CONFIG.baseTargetSize * 0.85; }
+
+    // 根据难度获取距离约束
+    const diffCfg = DIFFICULTY_CONFIG[gameState.difficulty];
+    const pad = size + 30;
+    const hudHeight = 120;
+    const minX = pad, maxX = window.innerWidth - pad;
+    const minY = pad + hudHeight, maxY = window.innerHeight - pad - 60;
+    const areaW = maxX - minX;
+    const areaH = maxY - minY;
+
+    let x, y, attempts = 0;
+    const maxAttempts = 50;
+
+    do {
+        x = minX + Math.random() * areaW;
+        y = minY + Math.random() * areaH;
+        attempts++;
+
+        // 如果有上一个目标位置，检查是否满足难度距离要求
+        if (gameState.lastTargetPos) {
+            const dx = x - gameState.lastTargetPos.x;
+            const dy = y - gameState.lastTargetPos.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+
+            // 计算最小和最大允许距离（基于屏幕对角线的比例）
+            const screenDiag = Math.sqrt(window.innerWidth * window.innerWidth + window.innerHeight * window.innerHeight);
+            const minDist = screenDiag * diffCfg.minDistanceRatio;
+            const maxDist = screenDiag * diffCfg.maxDistanceRatio;
+
+            // 距离必须在范围内（如果范围合理的话）
+            if (dist < minDist && attempts < maxAttempts - 5) {
+                continue; // 太近了，重新生成
+            }
+            // 如果超出最大距离也重新尝试（避免极端情况）
+            if (dist > maxDist && attempts < maxAttempts - 10) {
+                // 困难模式下偶尔允许远距离，不完全限制
+                if (Math.random() > 0.3) continue;
+            }
+        }
+
+        break;
+    } while (attempts < maxAttempts);
+
+    // 创建目标元素
+    const target = document.createElement('div');
+    target.className = `target type-${type}`;
+    target.style.width = `${size}px`;
+    target.style.height = `${size}px`;
+    target.style.left = `${x}px`;
+    target.style.top = `${y}px`;
+
+    target.dataset.type = type;
+    target.dataset.x = x;
+    target.dataset.y = y;
+    target.dataset.size = size;
+    target.dataset.spawnTime = Date.now().toString();
+
+    target.innerHTML = `
+        <div class="target-inner">
+            <div class="target-ring r1"></div>
+            <div class="target-ring r2"></div>
+            <div class="target-ring r3"></div>
+            <div class="target-core"></div>
+        </div>
+    `;
+
+    target.addEventListener('mousedown', (e) => {
+        e.stopPropagation();
+        handleHit(target, e.clientX, e.clientY);
+    });
+    target.addEventListener('touchstart', (e) => {
+        e.stopPropagation(); e.preventDefault();
+        handleHit(target, e.touches[0].clientX, e.touches[0].clientY);
+    }, { passive: false });
+
+    gameContainer.appendChild(target);
+    gameState.activeTarget = target;
+    gameState.lastTargetPos = { x, y };
+    gameState.currentTargetSpawnTime = Date.now();
+
+    // 速消型自动消失
+    if (type === 'speed') {
+        setTimeout(() => {
+            if (target.parentNode && !target.classList.contains('hitting') && gameState.isRunning && !gameState.isPaused) {
+                removeTarget(target);
+                handleMissClick(null, true);
+            }
+        }, CONFIG.targetLifetimeSpeedType);
+    }
+}
+
+function removeTarget(target) {
+    if (target && target.parentNode) target.remove();
+    if (gameState.activeTarget === target) gameState.activeTarget = null;
+}
+
+function clearAllTargets() {
+    gameContainer.querySelectorAll('.target').forEach(t => t.remove());
+    gameState.activeTarget = null;
+    gameState.lastTargetPos = null;
+}
+
+// ==================== 命中处理 ====================
+function handleHit(target, clickX, clickY) {
+    if (!gameState.isRunning || gameState.isPaused || target.classList.contains('hitting')) return;
+
+    const type = target.dataset.type;
+    const tx = parseFloat(target.dataset.x);
+    const ty = parseFloat(target.dataset.y);
+    const size = parseFloat(target.dataset.size);
+    const spawnTime = parseInt(target.dataset.spawnTime);
+
+    const reactionMs = Date.now() - spawnTime;
+    gameState.reactionTimes.push(reactionMs);
+
+    const dx = clickX - tx, dy = clickY - ty;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const coreRadius = size * 0.08;
+    const isCore = dist <= coreRadius;
+
+    let points = CONFIG.scorePerHit;
+    if (isCore) points += CONFIG.coreHitBonus;
+
+    let mult = 1.0;
+    if (type === 'small') mult = CONFIG.smallTargetMult;
+    if (type === 'speed') mult = CONFIG.speedTargetMult;
+
+    let reactionBonus = 0;
+    if (reactionMs < CONFIG.fastReactionThreshold) reactionBonus = CONFIG.fastReactionBonus;
+
+    gameState.combo++;
+    if (gameState.combo > gameState.maxCombo) gameState.maxCombo = gameState.combo;
+
+    const comboMultiplier = Math.min(1 + (gameState.combo - 1) * 0.08, CONFIG.maxComboMultiplier);
+    const finalPoints = Math.round(points * mult * comboMultiplier + reactionBonus);
+
+    gameState.score += finalPoints;
+    gameState.hits++;
+    gameState.totalShots++;
+
+    target.classList.add('hitting');
+    createHitParticles(clickX, clickY, type);
+    showScorePopup(clickX, clickY, finalPoints, isCore, reactionMs, mult > 1);
+    animateCrosshairHit();
+    showFeedback(isCore, reactionMs, mult);
+    updateHUD();
+    pulseComboUI();
+    startComboDecay();
+
+    setTimeout(() => {
+        removeTarget(target);
+        if (gameState.isRunning && !gameState.isPaused) spawnTarget();
+    }, 180);
+}
+
+// ==================== 失误处理 ====================
+function handleMissClick(e, isTimeout = false) {
+    if (!gameState.isRunning || gameState.isPaused) return;
+
+    if (e && !isTimeout) {
+        const rect = gameContainer.getBoundingClientRect();
+        if (e.clientX < rect.left || e.clientX > rect.right ||
+            e.clientY < rect.top || e.clientY > rect.bottom) return;
+    }
+
+    gameState.misses++;
+    gameState.totalShots++;
+    gameState.score = Math.max(0, gameState.score - CONFIG.missPenalty);
+    gameState.combo = 0;
+
+    if (!isTimeout) {
+        animateCrosshairMiss();
+        if (e) showScorePopup(e.clientX, e.clientY, -CONFIG.missPenalty, false, 0, false, true);
+    }
+    updateHUD();
+}
+
+// ==================== 视觉效果 ====================
+function animateCrosshairHit() { crosshair.classList.add('hit'); setTimeout(resetCrosshair, 100); }
+function animateCrosshairMiss() { crosshair.classList.add('miss'); setTimeout(resetCrosshair, 100); }
+
+function createHitParticles(x, y, type) {
+    const colors = type === 'normal' ? ['#ff5050','#ff8080','#ffaaaa'] :
+                   type === 'small' ? ['#ffaa00','#ffcc44','#ffee88'] :
+                   ['#aa44ff','#cc88ff','#eeaaff'];
+    for (let i = 0; i < 12; i++) {
+        const p = document.createElement('div');
+        p.className = 'hit-particle';
+        p.style.left = x + 'px'; p.style.top = y + 'px';
+        p.style.background = colors[Math.floor(Math.random() * colors.length)];
+        const angle = (Math.PI * 2 / 12) * i + (Math.random() - 0.5) * 0.5;
+        const dist = 40 + Math.random() * 60;
+        p.style.setProperty('--tx', `${Math.cos(angle)*dist}px`);
+        p.style.setProperty('--ty', `${Math.sin(angle)*dist}px`);
+        p.style.animation = `particleFly ${0.35+Math.random()*0.25}s ease-out forwards`;
+        document.body.appendChild(p);
+        setTimeout(() => p.remove(), 650);
+    }
+}
+
+function showScorePopup(x, y, points, isCore, reactionMs, isSpecial, isMiss = false) {
+    const popup = document.createElement('div');
+    popup.className = 'score-popup';
+    if (isMiss) {
+        popup.textContent = `MISS ${points}`; popup.style.color = '#ff6b6b';
+    } else {
+        let text = `+${points}`;
+        if (isCore) text += ' ★';
+        popup.textContent = text;
+        popup.style.color = (isSpecial||isCore) ? '#ffd93d' : (reactionMs < CONFIG.fastReactionThreshold ? '#a29bfe' : '#6bcb77');
+    }
+    popup.style.left = `${x}px`; popup.style.top = `${y}px`;
+    document.body.appendChild(popup);
+    setTimeout(() => popup.remove(), 850);
+}
+
+function showFeedback(isCore, reactionMs, mult) {
+    let cls, text;
+    if (isCore && reactionMs < 280) { cls = 'perfect'; text = 'PERFECT!'; }
+    else if (isCore || reactionMs < CONFIG.fastReactionThreshold) { cls = 'great'; text = 'GREAT!'; }
+    else { cls = 'good'; text = 'HIT!'; }
+    feedbackText.textContent = text;
+    feedbackText.className = `show ${cls}`;
+    setTimeout(() => feedbackText.classList.remove('show'), 400);
+}
+
+function pulseComboUI() {
+    const item = comboEl.parentElement;
+    item.classList.add('pulse');
+    setTimeout(() => item.classList.remove('pulse'), 200);
+}
+
+// ==================== HUD 更新 ====================
+function updateHUD() {
+    scoreEl.textContent = gameState.score;
+    comboEl.textContent = gameState.combo;
+    timerEl.textContent = gameState.timeLeft;
+
+    const acc = gameState.totalShots > 0 ? ((gameState.hits/gameState.totalShots)*100).toFixed(1) : '0.0';
+    accuracyEl.textContent = `${acc}%`;
+
+    if (gameState.reactionTimes.length > 0) {
+        const avg = Math.round(gameState.reactionTimes.reduce((a,b)=>a+b,0)/gameState.reactionTimes.length);
+        reactionEl.textContent = `${avg}ms`;
+    } else {
+        reactionEl.textContent = '---';
+    }
+
+    const comboPct = Math.min((gameState.combo/25)*100, 100);
+    comboBarFill.style.width = `${comboPct}%`;
+
+    if (gameState.combo >= 20)      { comboText.textContent='🔥 UNSTOPPABLE'; comboText.classList.add('visible'); }
+    else if (gameState.combo >= 12) { comboText.textContent='⚡ ON FIRE';     comboText.classList.add('visible'); }
+    else if (gameState.combo >= 6)  { comboText.textContent='🔥 COMBO';       comboText.classList.add('visible'); }
+    else                              { comboText.classList.remove('visible'); }
+}
+
+// ==================== 结算面板（含排行榜） ====================
+function showResultPanel(isQuit = false) {
+    startPanel.style.display = 'none';
+    resultPanel.classList.add('visible');
+
+    const total = gameState.hits + gameState.misses;
+    const acc = total > 0 ? ((gameState.hits/total)*100).toFixed(1) : '0.0';
+
+    document.getElementById('final-score').textContent = gameState.score;
+    document.getElementById('final-accuracy').textContent = `${acc}%`;
+    document.getElementById('final-hits').textContent = gameState.hits;
+    document.getElementById('final-misses').textContent = gameState.misses;
+    document.getElementById('final-max-combo').textContent = gameState.maxCombo;
+    document.getElementById('final-targets').textContent = gameState.hits;
+
+    if (gameState.reactionTimes.length > 0) {
+        const avgR = Math.round(gameState.reactionTimes.reduce((a,b)=>a+b,0)/gameState.reactionTimes.length);
+        const bestR = Math.min(...gameState.reactionTimes);
+        document.getElementById('final-avg-reaction').textContent = `${avgR}ms`;
+        document.getElementById('final-best-reaction').textContent = `${bestR}ms`;
+    } else {
+        document.getElementById('final-avg-reaction').textContent = '---';
+        document.getElementById('final-best-reaction').textContent = '---';
+    }
+
+    // 等级评定
+    const grade = calculateGrade(parseFloat(acc), gameState.score, gameState.maxCombo, gameState.hits);
+    const badge = document.getElementById('grade-badge');
+    badge.textContent = grade.letter;
+    badge.className = `grade-badge grade-${grade.letter}`;
+
+    if (isQuit) {
+        document.getElementById('result-subtitle').textContent = '训练已提前结束';
+    } else {
+        document.getElementById('result-subtitle').textContent = grade.title;
+    }
+
+    // 计算排行榜击败百分比
+    const rankInfo = calculateRank(gameState.score, gameState.difficulty);
+    document.getElementById('rank-beat-percent').textContent = `${rankInfo.beatPercent}%`;
+    document.getElementById('rank-beat-desc').textContent = rankInfo.descText;
+    document.getElementById('rank-beat-detail').textContent = rankInfo.detailText;
+    document.getElementById('rank-beat-box').style.display = '';
+
+    // 重置计时器样式
+    timerEl.style.color = '';
+    timerEl.style.animation = '';
+}
+
+/**
+ * 计算排行榜排名信息
+ * 使用正态分布 CDF 计算击败百分比
+ */
+function calculateRank(score, difficulty) {
+    const dist = LEADERBOARD[difficulty] || LEADERBOARD.normal;
+    const beatDecimal = LEADERBOARD.cdf(score, dist.mu, dist.sigma);
+    const beatPercent = Math.max(1, Math.min(99, Math.round(beatDecimal * 100)));
+
+    // 计算虚拟排名
+    const totalPlayersM = LEADERBOARD.totalPlayers;
+    const myRankM = ((1 - beatDecimal) * totalPlayersM).toFixed(1);
+    const totalStr = formatNumber(totalPlayersM * 10000);
+    const rankStr = formatNumber(parseFloat(myRankM) * 10000);
+
+    // 生成描述文字
+    let descText, detailText;
+    if (beatPercent >= 95) {
+        descText = `你击败了全球 ${beatPercent}% 的玩家！顶尖高手！`;
+        detailText = `排名约第 ${rankStr} 名 / 共 ${totalStr} 名${DIFFICULTY_CONFIG[difficulty].name}模式玩家`;
+    } else if (beatPercent >= 80) {
+        descText = `你击败了全球 ${beatPercent}% 的玩家！表现卓越！`;
+        detailText = `排名约第 ${rankStr} 名 / 共 ${totalStr} 名${DIFFICULTY_CONFIG[difficulty].name}模式玩家`;
+    } else if (beatPercent >= 60) {
+        descText = `你击败了全球 ${beatPercent}% 的玩家！超过半数！`;
+        detailText = `排名约第 ${rankStr} 名 / 共 ${totalStr} 名${DIFFICULTY_CONFIG[difficulty].name}模式玩家`;
+    } else if (beatPercent >= 40) {
+        descText = `你击败了全球 ${beatPercent}% 的玩家，继续加油！`;
+        detailText = `排名约第 ${rankStr} 名 / 共 ${totalStr} 名${DIFFICULTY_CONFIG[difficulty].name}模式玩家`;
+    } else if (beatPercent >= 20) {
+        descText = `你击败了全球 ${beatPercent}% 的玩家，还需努力~`;
+        detailText = `排名约第 ${rankStr} 名 / 共 ${totalStr} 名${DIFFICULTY_CONFIG[difficulty].name}模式玩家`;
+    } else {
+        descText = `你击败了全球 ${beatPercent}% 的玩家，多加练习！`;
+        detailText = `排名约第 ${rankStr} 名 / 共 ${totalStr} 名${DIFFICULTY_CONFIG[difficulty].name}模式玩家`;
+    }
+
+    return { beatPercent, descText, detailText };
+}
+
+/** 格式化为中文大数字显示 */
+function formatNumber(n) {
+    n = Math.max(1, Math.round(n));
+    if (n >= 10000) return (n / 10000).toFixed(n % 10000 === 0 ? 0 : 1) + '万';
+    return n.toLocaleString();
+}
+
+function calculateGrade(accuracy, score, maxCombo, hits) {
+    let rating = 0;
+
+    if (score >= 8000) rating += 40;
+    else if (score >= 5500) rating += 33;
+    else if (score >= 3800) rating += 26;
+    else if (score >= 2200) rating += 19;
+    else if (score >= 1000) rating += 12;
+    else rating += 5;
+
+    if (accuracy >= 85) rating += 25;
+    else if (accuracy >= 70) rating += 20;
+    else if (accuracy >= 55) rating += 15;
+    else if (accuracy >= 40) rating += 10;
+    else if (accuracy >= 25) rating += 5;
+    else rating += 2;
+
+    if (maxCombo >= 20) rating += 20;
+    else if (maxCombo >= 13) rating += 15;
+    else if (maxCombo >= 8) rating += 10;
+    else if (maxCombo >= 4) rating += 6;
+    else if (maxCombo >= 2) rating += 3;
+    else rating += 1;
+
+    if (hits >= 45) rating += 15;
+    else if (hits >= 35) rating += 11;
+    else if (hits >= 25) rating += 8;
+    else if (hits >= 15) rating += 5;
+    else if (hits >= 8) rating += 2;
+    else rating += 1;
+
+    if (rating >= 85) return { letter:'S', title:'神枪手！你的瞄准能力已臻化境！' };
+    if (rating >= 70) return { letter:'A', title:'精英射手！非常出色的表现！' };
+    if (rating >= 53) return { letter:'B', title:'熟练射手！继续保持训练！' };
+    if (rating >= 35) return { letter:'C', title:'初露锋芒！还有很大的提升空间' };
+    return { letter:'D', title:'新手上路！多加练习就能变强！' };
+}
+</script>
+
+</body>
+</html>

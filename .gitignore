@@ -1,0 +1,12 @@
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# WorkBuddy workspace data
+.workbuddy/
+
+# OS
+.DS_Store
+Thumbs.db
