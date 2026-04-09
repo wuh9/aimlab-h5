@@ -1209,6 +1209,8 @@ function spawnTarget() {
             if (target.parentNode && !target.classList.contains('hitting') && gameState.isRunning && !gameState.isPaused) {
                 removeTarget(target);
                 handleMissClick(null, true);
+                // 超时消失后必须生成下一个靶子，否则游戏卡住
+                if (gameState.isRunning && !gameState.isPaused) spawnTarget();
             }
         }, CONFIG.targetLifetimeSpeedType);
     }
